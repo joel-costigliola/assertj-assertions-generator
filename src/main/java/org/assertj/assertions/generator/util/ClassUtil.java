@@ -476,6 +476,30 @@ public class ClassUtil {
   }
 
   /**
+   * Gets the simple name of the outer class, if the class is not nested then this is the same as
+   * {@link Class#getSimpleName()}.
+   * <p>
+   * Example:
+   *
+   *  <pre>
+   *    OnlyOuter -> OnlyOuter
+   *    Outer.Inner -> Outer
+   *    Outer.Inner1.Inner2 -> Outer
+   *  </pre>
+   * @param clazz for which the outer class name should be found
+   * @return see description
+   */
+  public static String getSimpleNameOuterClass(Class<?> clazz) {
+    if (isNotNestedClass(clazz)) {
+      return clazz.getSimpleName();
+    }
+    String outerClassName = clazz.getName();
+    outerClassName = outerClassName.substring(clazz.getPackage().getName().length() + 1);
+    outerClassName = outerClassName.substring(0, outerClassName.indexOf('$'));
+    return outerClassName;
+  }
+
+  /**
    * Gets the simple name of the class but, unlike {@link Class#getSimpleName()}, it includes the name of the outer
    * class when <code>clazz</code> is an inner class, both class names are concatenated.
    * <p>

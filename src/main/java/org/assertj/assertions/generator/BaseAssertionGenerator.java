@@ -22,9 +22,12 @@ import org.assertj.assertions.generator.description.TypeName;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -319,12 +322,52 @@ public class BaseAssertionGenerator implements AssertionGenerator, AssertionsEnt
         ? determineBestEntryPointsAssertionsClassPackage(classDescriptionSet)
         : entryPointClassPackage;
     entryPointAssertionsClassContent = replace(entryPointAssertionsClassContent, PACKAGE, classPackage);
-
+    String imports = buildImports(classDescriptionSet);
+    entryPointAssertionsClassContent = replace(entryPointAssertionsClassContent, IMPORTS, imports);
     String allEntryPointsAssertionContent = generateAssertionEntryPointMethodsFor(classDescriptionSet,
                                                                                   entryPointAssertionMethodTemplate);
     entryPointAssertionsClassContent = replace(entryPointAssertionsClassContent, ALL_ASSERTIONS_ENTRY_POINTS,
                                                allEntryPointsAssertionContent);
     return entryPointAssertionsClassContent;
+  }
+
+  private static String buildImports(Set<ClassDescription> classDescriptionSet) {
+    StringBuilder builder = new StringBuilder();
+    for (String anImport : extractImports(classDescriptionSet)) {
+      builder.append(format(IMPORT_LINE, anImport, LINE_SEPARATOR));
+    }
+    return builder.toString();
+  }
+
+  /**
+   * The set will contain all the FQN of the imports for which simple class names can be used.
+   * <p>
+   * Example:
+   * <pre>
+   *   org.example.Outer -> part of the set
+   *   org.example.Outer.Inner -> org.example.Outer in the result
+   *   org.example.other.Outer -> not in the set because another FQN for the same simple class name Outer already exists
+   *   org.example.other.Outer.Inner -> same as above, another FQN for the same outer class name exists
+   * </pre>
+   *
+   * @param classDescriptionSet for which we need to extract the imports
+   * @return a sorted set with all the FQN that can be imported
+   */
+  private static SortedSet<String> extractImports(Set<ClassDescription> classDescriptionSet) {
+    Map<String, String> importedQualifiedName = new HashMap<>(classDescriptionSet.size() * 2);
+    for (final ClassDescription description : new TreeSet<>(classDescriptionSet)) {
+      final String outerClassName = description.getOuterClassName();
+      if (!importedQualifiedName.containsKey(outerClassName)) {
+        String toImport = description.getPackageName() + "." + outerClassName;
+        importedQualifiedName.put(outerClassName, toImport);
+      }
+
+      if (!importedQualifiedName.containsKey(simpleAssertClassName(description))) {
+        String toImport = fullyQualifiedAssertClassName(description);
+        importedQualifiedName.put(simpleAssertClassName(description), toImport);
+      }
+    }
+    return new TreeSet<>(importedQualifiedName.values());
   }
 
   /**
@@ -353,6 +396,7 @@ public class BaseAssertionGenerator implements AssertionGenerator, AssertionsEnt
 
   private String generateAssertionEntryPointMethodsFor(final Set<ClassDescription> classDescriptionSet,
                                                        Template assertionEntryPointMethodTemplate) {
+    SortedSet<String> resolvedImports = extractImports(classDescriptionSet);
     // sort ClassDescription according to their class name.
     SortedSet<ClassDescription> sortedClassDescriptionSet = new TreeSet<ClassDescription>(classDescriptionSet);
     // generate for each classDescription the entry point method, e.g. assertThat(MyClass) or then(MyClass)
@@ -362,12 +406,23 @@ public class BaseAssertionGenerator implements AssertionGenerator, AssertionsEnt
       String assertionEntryPointMethodContent = assertionEntryPointMethodTemplate.getContent();
       // resolve class assert (ex: PlayerAssert)
       // in case of inner classes like Movie.PublicCategory, class assert will be MoviePublicCategoryAssert
+      String customAssertionClass = fullyQualifiedAssertClassName(classDescription);
+      if (resolvedImports.contains(customAssertionClass)) {
+        // if the FQN exists in the resolved imports then we can use its simple class name instead
+        customAssertionClass = simpleAssertClassName(classDescription);
+      }
       assertionEntryPointMethodContent = replace(assertionEntryPointMethodContent, CUSTOM_ASSERTION_CLASS,
-                                                 fullyQualifiedAssertClassName(classDescription));
+                                                 customAssertionClass);
       // resolve class (ex: Player)
       // in case of inner classes like Movie.PublicCategory use class name with outer class i.e. Movie.PublicCategory.
+      String classToAssert = classDescription.getFullyQualifiedClassName();
+      if (resolvedImports.contains(classDescription.getPackageName() + "." + classDescription.getOuterClassName())) {
+        // if the FQN exists in the resolved imports then we can use its simple class name instead or the
+        // simple class name of its outer class like in the case of Movie.PublicCategory
+        classToAssert = classDescription.getClassNameWithOuterClass();
+      }
       assertionEntryPointMethodContent = replace(assertionEntryPointMethodContent, CLASS_TO_ASSERT,
-                                                 classDescription.getFullyQualifiedClassName());
+                                                 classToAssert);
       allAssertThatsContentBuilder.append(lineSeparator).append(assertionEntryPointMethodContent);
     }
     return allAssertThatsContentBuilder.toString();
@@ -405,7 +460,11 @@ public class BaseAssertionGenerator implements AssertionGenerator, AssertionsEnt
   }
 
   private static String fullyQualifiedAssertClassName(ClassDescription classDescription) {
-    return classDescription.getPackageName() + "." + classDescription.getClassNameWithOuterClassNotSeparatedByDots()
+    return classDescription.getPackageName() + "." + simpleAssertClassName(classDescription);
+  }
+
+  private static String simpleAssertClassName(ClassDescription classDescription) {
+    return classDescription.getClassNameWithOuterClassNotSeparatedByDots()
            + ASSERT_CLASS_SUFFIX;
   }
 
